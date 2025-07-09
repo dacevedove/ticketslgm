@@ -1,5 +1,5 @@
 <?php
-// api/crear_ticket.php
+// api/editar_ticket.php
 require_once '../config/database.php';
 
 header('Content-Type: application/json');
@@ -10,6 +10,11 @@ verificarRol('atencion');
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['success' => false, 'message' => 'Método no permitido']);
+    exit();
+}
+
+if (!isset($_POST['id']) || !is_numeric($_POST['id'])) {
+    echo json_encode(['success' => false, 'message' => 'ID de ticket inválido']);
     exit();
 }
 
@@ -28,23 +33,42 @@ if (!validarCedula($_POST['cedula'])) {
     exit();
 }
 
-// Validar montos
-if (!is_numeric($_POST['montoBs']) || !is_numeric($_POST['montoUsd']) || !is_numeric($_POST['tasaDia'])) {
-    echo json_encode(['success' => false, 'message' => 'Los montos deben ser números válidos']);
-    exit();
-}
-
 try {
     $database = new Database();
     $db = $database->getConnection();
     
-    $query = "INSERT INTO tickets (
-        tasa_dia, fecha_emision, paciente, cedula, historia, numero_historia, 
-        monto_bs, monto_usd, factura, procedimiento, usuario_creador
-    ) VALUES (
-        :tasa_dia, :fecha_emision, :paciente, :cedula, :historia, :numero_historia,
-        :monto_bs, :monto_usd, :factura, :procedimiento, :usuario_creador
-    )";
+    // Verificar que el ticket existe, pertenece al usuario y está pendiente
+    $check_query = "SELECT estado FROM tickets WHERE id = :id AND usuario_creador = :usuario_id";
+    $check_stmt = $db->prepare($check_query);
+    $check_stmt->bindParam(':id', $_POST['id']);
+    $check_stmt->bindParam(':usuario_id', $_SESSION['usuario_id']);
+    $check_stmt->execute();
+    
+    $ticket = $check_stmt->fetch();
+    
+    if (!$ticket) {
+        echo json_encode(['success' => false, 'message' => 'Ticket no encontrado']);
+        exit();
+    }
+    
+    if ($ticket['estado'] !== 'pendiente') {
+        echo json_encode(['success' => false, 'message' => 'No se puede editar un ticket que ya fue pagado']);
+        exit();
+    }
+    
+    // Actualizar el ticket
+    $query = "UPDATE tickets SET 
+                tasa_dia = :tasa_dia,
+                fecha_emision = :fecha_emision,
+                paciente = :paciente,
+                cedula = :cedula,
+                historia = :historia,
+                numero_historia = :numero_historia,
+                monto_bs = :monto_bs,
+                monto_usd = :monto_usd,
+                factura = :factura,
+                procedimiento = :procedimiento
+              WHERE id = :id AND usuario_creador = :usuario_id";
     
     $stmt = $db->prepare($query);
     
@@ -61,16 +85,16 @@ try {
     $stmt->bindParam(':monto_usd', $_POST['montoUsd']);
     $stmt->bindParam(':factura', $_POST['factura']);
     $stmt->bindParam(':procedimiento', $_POST['procedimiento']);
-    $stmt->bindParam(':usuario_creador', $_SESSION['usuario_id']);
+    $stmt->bindParam(':id', $_POST['id']);
+    $stmt->bindParam(':usuario_id', $_SESSION['usuario_id']);
     
     if ($stmt->execute()) {
         echo json_encode([
             'success' => true,
-            'message' => 'Ticket creado exitosamente',
-            'ticket_id' => $db->lastInsertId()
+            'message' => 'Ticket actualizado exitosamente'
         ]);
     } else {
-        echo json_encode(['success' => false, 'message' => 'Error al crear el ticket']);
+        echo json_encode(['success' => false, 'message' => 'Error al actualizar el ticket']);
     }
     
 } catch (Exception $e) {
